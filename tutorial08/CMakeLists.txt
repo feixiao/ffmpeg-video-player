@@ -3,6 +3,11 @@
 ##
 cmake_minimum_required(VERSION 3.11)
 
+
+
+add_definitions("-Wall -O2")
+
+
 ##
 # tutorial07 C Project CMakeLists.txt.
 ##

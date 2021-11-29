@@ -43,15 +43,6 @@
  */
 #define MAX_AUDIOQ_SIZE (5 * 16 * 1024)
 
-/**
- * Video packets queue maximum size.
- */
-#define MAX_VIDEOQ_SIZE (5 * 256 * 1024)
-
-/**
- * AV sync correction threshold.
- */
-#define AV_SYNC_THRESHOLD 0.01
 
 /**
  * No AV sync correction threshold.
@@ -79,11 +70,6 @@
  * Notifies the program needs to quit.
  */
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
-
-/**
- * Video Frame queue size.
- */
-#define VIDEO_PICTURE_QUEUE_SIZE 1
 
 /**
  * Default audio video sync type.
@@ -127,10 +113,10 @@ typedef struct VideoState
     uint8_t             audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) /2];
     unsigned int        audio_buf_size;
     unsigned int        audio_buf_index;
-    AVFrame             audio_frame;
+//    AVFrame             audio_frame;
     AVPacket            audio_pkt;
-    uint8_t *           audio_pkt_data;
-    int                 audio_pkt_size;
+//    uint8_t *           audio_pkt_data;
+//    int                 audio_pkt_size;
     double              audio_clock;
 
 
@@ -158,7 +144,6 @@ typedef struct VideoState
      * Threads.
      */
     SDL_Thread *    decode_tid;
-    SDL_Thread *    video_tid;
 
     /**
      * Input file name.
@@ -170,11 +155,11 @@ typedef struct VideoState
      */
     int quit;
 
-    /**
-     * Maximum number of frames to be decoded.
-     */
+//    /**
+//     * Maximum number of frames to be decoded.
+//     */
     long    maxFramesToDecode;
-    int     currentFrameIndex;
+//    int     currentFrameIndex;
 } VideoState;
 
 /**
@@ -206,25 +191,10 @@ enum
     AV_SYNC_AUDIO_MASTER,
 
     /**
-     * Sync to video clock.
-     */
-    AV_SYNC_VIDEO_MASTER,
-
-    /**
      * Sync to external clock: the computer clock
      */
     AV_SYNC_EXTERNAL_MASTER,
 };
-
-/**
- * Global SDL_Window reference.
- */
-SDL_Window * screen;
-
-/**
- * Global SDL_Surface mutex reference.
- */
-SDL_mutex * screen_mutex;
 
 /**
  * Global VideoState reference.
@@ -248,28 +218,6 @@ int stream_component_open(
         int stream_index
 );
 
-void alloc_picture(void * userdata);
-
-int queue_picture(
-        VideoState * videoState,
-        AVFrame * pFrame,
-        double pts
-);
-
-int video_thread(void * arg);
-
-static int64_t guess_correct_pts(
-        AVCodecContext * ctx,
-        int64_t reordered_pts,
-        int64_t dts
-);
-
-double synchronize_video(
-        VideoState * videoState,
-        AVFrame * src_frame,
-        double pts
-);
-
 int synchronize_audio(
         VideoState * videoState,
         short * samples,
@@ -278,8 +226,6 @@ int synchronize_audio(
 
 
 double get_audio_clock(VideoState * videoState);
-
-double get_video_clock(VideoState * videoState);
 
 double get_external_clock(VideoState * videoState);
 
@@ -294,8 +240,6 @@ static Uint32 sdl_refresh_timer_cb(
         Uint32 interval,
         void * param
 );
-
-void video_display(VideoState * videoState);
 
 void packet_queue_init(PacketQueue * q);
 
@@ -824,56 +768,6 @@ int stream_component_open(VideoState * videoState, int stream_index)
     }
 
     return 0;
-}
-
-
-/**
- * Attempts to guess proper monotonic timestamps for decoded video frames which
- * might have incorrect times.
- *
- * Input timestamps may wrap around, in which case the output will as well.
- *
- * @param   ctx             the video AVCodecContext.
- * @param   reordered_pts   the pts field of the decoded AVPacket, as passed
- *                          through AVFrame.pts.
- * @param   dts             the pkt_dts field of the decoded AVPacket.
- *
- * @return                  one of the input values, may be AV_NOPTS_VALUE.
- */
-static int64_t guess_correct_pts(AVCodecContext * ctx, int64_t reordered_pts, int64_t dts)
-{
-    int64_t pts;
-
-    if (dts != AV_NOPTS_VALUE)
-    {
-        ctx->pts_correction_num_faulty_dts += dts <= ctx->pts_correction_last_dts;
-        ctx->pts_correction_last_dts = dts;
-    }
-    else if (reordered_pts != AV_NOPTS_VALUE)
-    {
-        ctx->pts_correction_last_dts = reordered_pts;
-    }
-
-    if (reordered_pts != AV_NOPTS_VALUE)
-    {
-        ctx->pts_correction_num_faulty_pts += reordered_pts <= ctx->pts_correction_last_pts;
-        ctx->pts_correction_last_pts = reordered_pts;
-    }
-    else if (dts != AV_NOPTS_VALUE)
-    {
-        ctx->pts_correction_last_pts = dts;
-    }
-
-    if ((ctx->pts_correction_num_faulty_pts <= ctx->pts_correction_num_faulty_dts || dts == AV_NOPTS_VALUE) && reordered_pts != AV_NOPTS_VALUE)
-    {
-        pts = reordered_pts;
-    }
-    else
-    {
-        pts = dts;
-    }
-
-    return pts;
 }
 
 
