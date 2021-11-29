@@ -103,17 +103,6 @@ typedef struct PacketQueue
     SDL_cond *      cond;
 } PacketQueue;
 
-/**
- * Queue structure used to store processed video frames.
- */
-typedef struct VideoPicture
-{
-    AVFrame *   frame;
-    int         width;
-    int         height;
-    int         allocated;
-    double      pts;
-} VideoPicture;
 
 /**
  * Struct used to hold the format context, the indices of the audio and video stream,
@@ -144,36 +133,12 @@ typedef struct VideoState
     int                 audio_pkt_size;
     double              audio_clock;
 
-    /**
-     * Video Stream.
-     */
-    int                 videoStream;
-    AVStream *          video_st;
-    AVCodecContext *    video_ctx;
-    SDL_Texture *       texture;
-    SDL_Renderer *      renderer;
-    PacketQueue         videoq;
-    struct swsContext * sws_ctx;
-    double              frame_timer;
-    double              frame_last_pts;
-    double              frame_last_delay;
-    double              video_clock;
-    double              video_current_pts;
-    int64_t             video_current_pts_time;
+
     double              audio_diff_cum;
     double              audio_diff_avg_coef;
     double              audio_diff_threshold;
     int                 audio_diff_avg_count;
 
-    /**
-     * VideoPicture Queue.
-     */
-    VideoPicture        pictq[VIDEO_PICTURE_QUEUE_SIZE];
-    int                 pictq_size;
-    int                 pictq_rindex;
-    int                 pictq_windex;
-    SDL_mutex *         pictq_mutex;
-    SDL_cond *          pictq_cond;
 
     /**
      * AV Sync.
@@ -413,10 +378,6 @@ int main(int argc, char * argv[])
     char * pEnd;
     videoState->maxFramesToDecode = strtol(argv[2], &pEnd, 10);
 
-    // initialize locks for the display buffer (pictq)
-    videoState->pictq_mutex = SDL_CreateMutex();
-    videoState->pictq_cond = SDL_CreateCond();
-
     // launch our threads by pushing an SDL_event of type FF_REFRESH_EVENT
     schedule_refresh(videoState, 100);
 
@@ -511,7 +472,6 @@ int main(int argc, char * argv[])
                  * terminate normally.
                  */
                 SDL_CondSignal(videoState->audioq.cond);
-                SDL_CondSignal(videoState->videoq.cond);
 
                 SDL_Quit();
             }
@@ -573,7 +533,6 @@ int decode_thread(void * arg)
     }
 
     // reset stream indexes
-    videoState->videoStream = -1;
     videoState->audioStream = -1;
 
     // set global VideoState reference
@@ -655,28 +614,19 @@ int decode_thread(void * arg)
         // seek stuff goes here
         if(videoState->seek_req)
         {
-            int video_stream_index = -1;
             int audio_stream_index = -1;
             int64_t seek_target = videoState->seek_pos;
-
-            if (videoState->videoStream >= 0)
-            {
-                video_stream_index = videoState->videoStream;
-            }
 
             if (videoState->audioStream >= 0)
             {
                 audio_stream_index = videoState->audioStream;
             }
 
-            if(video_stream_index >= 0 && audio_stream_index >= 0)
+            if( audio_stream_index >= 0)
             {
-                seek_target = av_rescale_q(seek_target, AV_TIME_BASE_Q, pFormatCtx->streams[video_stream_index]->time_base);
 
                 seek_target = av_rescale_q(seek_target, AV_TIME_BASE_Q, pFormatCtx->streams[audio_stream_index]->time_base);
             }
-
-            ret = av_seek_frame(videoState->pFormatCtx, video_stream_index, seek_target, videoState->seek_flags);
 
             ret &= av_seek_frame(videoState->pFormatCtx, audio_stream_index, seek_target, videoState->seek_flags);
 
@@ -686,11 +636,6 @@ int decode_thread(void * arg)
             }
             else
             {
-                if (videoState->videoStream >= 0)
-                {
-                    packet_queue_flush(&videoState->videoq);
-                    packet_queue_put(&videoState->videoq, &flush_pkt);
-                }
 
                 if (videoState->audioStream >= 0)
                 {
@@ -703,7 +648,7 @@ int decode_thread(void * arg)
         }
 
         // check audio and video packets queues size
-        if (videoState->audioq.size > MAX_AUDIOQ_SIZE || videoState->videoq.size > MAX_VIDEOQ_SIZE)
+        if (videoState->audioq.size > MAX_AUDIOQ_SIZE)
         {
             // wait for audio and video queues to decrease size
             SDL_Delay(10);
@@ -735,12 +680,7 @@ int decode_thread(void * arg)
             }
         }
 
-        // put the packet in the appropriate queue
-        if (packet->stream_index == videoState->videoStream)
-        {
-            packet_queue_put(&videoState->videoq, packet);
-        }
-        else if (packet->stream_index == videoState->audioStream)
+        if (packet->stream_index == videoState->audioStream)
         {
             packet_queue_put(&videoState->audioq, packet);
         }
@@ -876,76 +816,6 @@ int stream_component_open(VideoState * videoState, int stream_index)
             SDL_PauseAudio(0);
         }
             break;
-
-        case AVMEDIA_TYPE_VIDEO:
-        {
-            // set VideoState video related fields
-            videoState->videoStream = stream_index;
-            videoState->video_st = pFormatCtx->streams[stream_index];
-            videoState->video_ctx = codecCtx;
-
-            // Don't forget to initialize the frame timer and the initial
-            // previous frame delay: 1ms = 1e-6s
-            videoState->frame_timer = (double)av_gettime() / 1000000.0;
-            videoState->frame_last_delay = 40e-3;
-            videoState->video_current_pts_time = av_gettime();
-
-            // init video packet queue
-            packet_queue_init(&videoState->videoq);
-
-            // start video thread
-            videoState->video_tid = SDL_CreateThread(video_thread, "Video Thread", videoState);
-
-            // set up the VideoState SWSContext to convert the image data to YUV420
-            videoState->sws_ctx = sws_getContext(videoState->video_ctx->width,
-                                                 videoState->video_ctx->height,
-                                                 videoState->video_ctx->pix_fmt,
-                                                 videoState->video_ctx->width,
-                                                 videoState->video_ctx->height,
-                                                 AV_PIX_FMT_YUV420P,
-                                                 SWS_BILINEAR,
-                                                 NULL,
-                                                 NULL,
-                                                 NULL
-            );
-
-            // create a window with the specified position, dimensions, and flags.
-            screen = SDL_CreateWindow(
-                    "FFmpeg SDL Video Player",
-                    SDL_WINDOWPOS_UNDEFINED,
-                    SDL_WINDOWPOS_UNDEFINED,
-                    codecCtx->width,
-                    codecCtx->height,
-                    SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI
-            );
-
-            // check window was correctly created
-            if (!screen)
-            {
-                printf("SDL: could not create window - exiting.\n");
-                return -1;
-            }
-
-            //
-            SDL_GL_SetSwapInterval(1);
-
-            // initialize global SDL_Surface mutex reference
-            screen_mutex = SDL_CreateMutex();
-
-            // create a 2D rendering context for the SDL_Window
-            videoState->renderer = SDL_CreateRenderer(screen, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE);
-
-            // create a texture for a rendering context
-            videoState->texture = SDL_CreateTexture(
-                    videoState->renderer,
-                    SDL_PIXELFORMAT_YV12,
-                    SDL_TEXTUREACCESS_STREAMING,
-                    videoState->video_ctx->width,
-                    videoState->video_ctx->height
-            );
-        }
-            break;
-
         default:
         {
             // nothing to do
@@ -956,288 +826,6 @@ int stream_component_open(VideoState * videoState, int stream_index)
     return 0;
 }
 
-/**
- * Allocates a new SDL_Overlay for the VideoPicture struct referenced by the
- * global VideoState struct reference.
- * The remaining VideoPicture struct fields are also updated.
- *
- * @param   userdata    the global VideoState reference.
- */
-void alloc_picture(void * userdata)
-{
-    // retrieve global VideoState reference.
-    VideoState * videoState = (VideoState *)userdata;
-
-    // retrieve the VideoPicture pointed by the queue write index
-    VideoPicture * videoPicture;
-    videoPicture = &videoState->pictq[videoState->pictq_windex];
-
-    // check if the SDL_Overlay is allocated
-    if (videoPicture->frame)
-    {
-        // we already have an AVFrame allocated, free memory
-        av_frame_free(&videoPicture->frame);
-        av_free(videoPicture->frame);
-    }
-
-    // lock global screen mutex
-    SDL_LockMutex(screen_mutex);
-
-    // get the size in bytes required to store an image with the given parameters
-    int numBytes;
-    numBytes = av_image_get_buffer_size(
-            AV_PIX_FMT_YUV420P,
-            videoState->video_ctx->width,
-            videoState->video_ctx->height,
-            32
-    );
-
-    // allocate image data buffer
-    uint8_t * buffer = NULL;
-    buffer = (uint8_t *) av_malloc(numBytes * sizeof(uint8_t));
-
-    // alloc the AVFrame later used to contain the scaled frame
-    videoPicture->frame = av_frame_alloc();
-    if (videoPicture->frame == NULL)
-    {
-        printf("Could not allocate frame.\n");
-        return;
-    }
-
-    // The fields of the given image are filled in by using the buffer which points to the image data buffer.
-    av_image_fill_arrays(
-            videoPicture->frame->data,
-            videoPicture->frame->linesize,
-            buffer,
-            AV_PIX_FMT_YUV420P,
-            videoState->video_ctx->width,
-            videoState->video_ctx->height,
-            32
-    );
-
-    // unlock global screen mutex
-    SDL_UnlockMutex(screen_mutex);
-
-    // update VideoPicture struct fields
-    videoPicture->width = videoState->video_ctx->width;
-    videoPicture->height = videoState->video_ctx->height;
-    videoPicture->allocated = 1;
-}
-
-/**
- * Waits for space in the VideoPicture queue. Allocates a new SDL_Overlay in case
- * it is not already allocated or has a different width/height. Converts the given
- * decoded AVFrame to an AVPicture using specs supported by SDL and writes it in the
- * VideoPicture queue.
- *
- * @param   videoState  the global VideoState reference.
- * @param   pFrame      AVFrame to be inserted in the VideoState->pictq (as an AVPicture).
- *
- * @return              < 0 in case the global quit flag is set, 0 otherwise.
- */
-int queue_picture(VideoState * videoState, AVFrame * pFrame, double pts)
-{
-    // lock VideoState->pictq mutex
-    SDL_LockMutex(videoState->pictq_mutex);
-
-    // wait until we have space for a new pic in VideoState->pictq
-    while (videoState->pictq_size >= VIDEO_PICTURE_QUEUE_SIZE && !videoState->quit)
-    {
-        SDL_CondWait(videoState->pictq_cond, videoState->pictq_mutex);
-    }
-
-    // unlock VideoState->pictq mutex
-    SDL_UnlockMutex(videoState->pictq_mutex);
-
-    // check global quit flag
-    if (videoState->quit)
-    {
-        return -1;
-    }
-
-    // retrieve video picture using the queue write index
-    VideoPicture * videoPicture;
-    videoPicture = &videoState->pictq[videoState->pictq_windex];
-
-    // if the VideoPicture SDL_Overlay is not allocated or has a different width/height
-    if (!videoPicture->frame ||
-        videoPicture->width != videoState->video_ctx->width ||
-        videoPicture->height != videoState->video_ctx->height)
-    {
-        // set SDL_Overlay not allocated
-        videoPicture->allocated = 0;
-
-        // allocate a new SDL_Overlay for the VideoPicture struct
-        alloc_picture(videoState);
-
-        // check global quit flag
-        if(videoState->quit)
-        {
-            return -1;
-        }
-    }
-
-    // check the new SDL_Overlay was correctly allocated
-    if (videoPicture->frame)
-    {
-        // set pts value for the last decode frame in the VideoPicture queu (pctq)
-        videoPicture->pts = pts;
-
-        // set VideoPicture AVFrame info using the last decoded frame
-        videoPicture->frame->pict_type = pFrame->pict_type;
-        videoPicture->frame->pts = pFrame->pts;
-        videoPicture->frame->pkt_dts = pFrame->pkt_dts;
-        videoPicture->frame->key_frame = pFrame->key_frame;
-        videoPicture->frame->coded_picture_number = pFrame->coded_picture_number;
-        videoPicture->frame->display_picture_number = pFrame->display_picture_number;
-        videoPicture->frame->width = pFrame->width;
-        videoPicture->frame->height = pFrame->height;
-
-        // scale the image in pFrame->data and put the resulting scaled image in pict->data
-        sws_scale(
-                videoState->sws_ctx,
-                (uint8_t const * const *)pFrame->data,
-                pFrame->linesize,
-                0,
-                videoState->video_ctx->height,
-                videoPicture->frame->data,
-                videoPicture->frame->linesize
-        );
-
-        // update VideoPicture queue write index
-        ++videoState->pictq_windex;
-
-        // if the write index has reached the VideoPicture queue size
-        if(videoState->pictq_windex == VIDEO_PICTURE_QUEUE_SIZE)
-        {
-            // set it to 0
-            videoState->pictq_windex = 0;
-        }
-
-        // lock VideoPicture queue
-        SDL_LockMutex(videoState->pictq_mutex);
-
-        // increase VideoPicture queue size
-        videoState->pictq_size++;
-
-        // unlock VideoPicture queue
-        SDL_UnlockMutex(videoState->pictq_mutex);
-    }
-
-    return 0;
-}
-
-/**
- * This function is used as callback for the SDL_Thread.
- *
- * This thread reads in packets from the video queue, packet_queue_get(), decodes
- * the video packets into a frame, and then calls the queue_picture() function to
- * put the processed frame into the picture queue.
- *
- * @param   arg the data pointer passed to the SDL_Thread callback function.
- *
- * @return
- */
-int video_thread(void * arg)
-{
-    // retrieve global VideoState reference
-    VideoState * videoState = (VideoState *)arg;
-
-    // allocate an AVPacket to be used to retrieve data from the videoq.
-    AVPacket * packet = av_packet_alloc();
-    if (packet == NULL)
-    {
-        printf("Could not allocate AVPacket.\n");
-        return -1;
-    }
-
-    // set this when we are done decoding an entire frame
-    int frameFinished = 0;
-
-    // allocate a new AVFrame, used to decode video packets
-    static AVFrame * pFrame = NULL;
-    pFrame = av_frame_alloc();
-    if (!pFrame)
-    {
-        printf("Could not allocate AVFrame.\n");
-        return -1;
-    }
-
-    // each decoded frame carries its PTS in the VideoPicture queue
-    double pts;
-
-    for (;;)
-    {
-        // get a packet from the video PacketQueue
-        int ret = packet_queue_get(&videoState->videoq, packet, 1);
-        if (ret < 0)
-        {
-            // means we quit getting packets
-            break;
-        }
-
-        // give the decoder raw compressed data in an AVPacket
-        ret = avcodec_send_packet(videoState->video_ctx, packet);
-        if (ret < 0)
-        {
-            printf("Error sending packet for decoding.\n");
-            return -1;
-        }
-
-        while (ret >= 0)
-        {
-            // get decoded output data from decoder
-            ret = avcodec_receive_frame(videoState->video_ctx, pFrame);
-
-            // check an entire frame was decoded
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            {
-                break;
-            }
-            else if (ret < 0)
-            {
-                printf("Error while decoding.\n");
-                return -1;
-            }
-            else
-            {
-                frameFinished = 1;
-            }
-
-            // attempt to guess proper monotonic timestamps for decoded video frames
-            pts = guess_correct_pts(videoState->video_ctx, pFrame->pts, pFrame->pkt_dts);
-
-            // in case we get an undefined timestamp value
-            if (pts == AV_NOPTS_VALUE)
-            {
-                // set pts to the default value of 0
-                pts = 0;
-            }
-
-            pts *= av_q2d(videoState->video_st->time_base);
-
-            // did we get an entire video frame?
-            if (frameFinished)
-            {
-                pts = synchronize_video(videoState, pFrame, pts);
-
-                if(queue_picture(videoState, pFrame, pts) < 0)
-                {
-                    break;
-                }
-            }
-        }
-
-        // wipe the packet
-        av_packet_unref(packet);
-    }
-
-    // wipe the frame
-    av_frame_free(&pFrame);
-    av_free(pFrame);
-
-    return 0;
-}
 
 /**
  * Attempts to guess proper monotonic timestamps for decoded video frames which
@@ -1288,50 +876,6 @@ static int64_t guess_correct_pts(AVCodecContext * ctx, int64_t reordered_pts, in
     return pts;
 }
 
-/**
- * Updates the PTS of the last decoded video frame to be in sync with everything.
- * This function will also deal with cases where we don't get a PTS value
- * for our frame. At the same time we need to keep track of when the next frame
- * is expected so we can set our refresh rate properly. We can accomplish this by
- * using the VideoState internal video_clock value which keeps track of how much
- * time has passed according to the video.
- *
- * You'll notice we account for repeated frames in this function, too.
- *
- * @param   videoState  the global VideoState reference.
- * @param   src_frame   last decoded video AVFrame, not yet queued in the
- *                      VideoPicture queue.
- * @param   pts         the pts of the last decoded video AVFrame obtained using
- *                      FFmpeg guess_correct_pts.
- *
- * @return              the updated (synchronized) pts for the given video AVFrame.
- */
-double synchronize_video(VideoState * videoState, AVFrame * src_frame, double pts)
-{
-    double frame_delay;
-
-    if (pts != 0)
-    {
-        // if we have pts, set video clock to it
-        videoState->video_clock = pts;
-    }
-    else
-    {
-        // if we aren't given a pts, set it to the clock
-        pts = videoState->video_clock;
-    }
-
-    // update the video clock
-    frame_delay = av_q2d(videoState->video_ctx->time_base);
-
-    // if we are repeating a frame, adjust clock accordingly
-    frame_delay += src_frame->repeat_pict * (frame_delay * 0.5);
-
-    // increase video clock to match the delay required for repeaing frames
-    videoState->video_clock += frame_delay;
-
-    return pts;
-}
 
 /**
  * So we're going to use a fractional coefficient, say c, and So now let's say
@@ -1482,20 +1026,6 @@ double get_audio_clock(VideoState * videoState)
 }
 
 /**
- * Calculates and returns the current video clock reference value.
- *
- * @param   videoState  the global VideoState reference.
- *
- * @return              the current video clock reference value.
- */
-double get_video_clock(VideoState * videoState)
-{
-    double delta = (av_gettime() - videoState->video_current_pts_time) / 1000000.0;
-
-    return videoState->video_current_pts + delta;
-}
-
-/**
  * Calculates and returns the current external clock reference value: the computer
  * clock.
  *
@@ -1519,11 +1049,7 @@ double get_external_clock(VideoState * videoState)
  */
 double get_master_clock(VideoState * videoState)
 {
-    if (videoState->av_sync_type == AV_SYNC_VIDEO_MASTER)
-    {
-        return get_video_clock(videoState);
-    }
-    else if (videoState->av_sync_type == AV_SYNC_AUDIO_MASTER)
+ if (videoState->av_sync_type == AV_SYNC_AUDIO_MASTER)
     {
         return get_audio_clock(videoState);
     }
@@ -1584,135 +1110,6 @@ static Uint32 sdl_refresh_timer_cb(Uint32 interval, void * param)
 
     // return 0 to cancel the timer
     return 0;
-}
-
-/**
- * Retrieves the video aspect ratio first, which is just the width divided by the
- * height. Then it scales the movie to fit as big as possible in our screen
- * (SDL_Surface). Then it centers the movie, and calls SDL_DisplayYUVOverlay()
- * to update the surface, making sure we use the screen mutex to access it.
- *
- * @param   videoState  the global VideoState reference.
- */
-void video_display(VideoState * videoState)
-{
-    // reference for the next VideoPicture to be displayed
-    VideoPicture * videoPicture;
-
-    double aspect_ratio;
-
-    int w, h, x, y;
-
-    // get next VideoPicture to be displayed from the VideoPicture queue
-    videoPicture = &videoState->pictq[videoState->pictq_rindex];
-
-    if (videoPicture->frame)
-    {
-        if (videoState->video_ctx->sample_aspect_ratio.num == 0)
-        {
-            aspect_ratio = 0;
-        }
-        else
-        {
-            aspect_ratio = av_q2d(videoState->video_ctx->sample_aspect_ratio) * videoState->video_ctx->width / videoState->video_ctx->height;
-        }
-
-        if (aspect_ratio <= 0.0)
-        {
-            aspect_ratio = (float)videoState->video_ctx->width /
-                           (float)videoState->video_ctx->height;
-        }
-
-        // get the size of a window's client area
-        int screen_width;
-        int screen_height;
-        SDL_GetWindowSize(screen, &screen_width, &screen_height);
-
-        // global SDL_Surface height
-        h = screen_height;
-
-        // retrieve width using the calculated aspect ratio and the screen height
-        w = ((int) rint(h * aspect_ratio)) & -3;
-
-        // if the new width is bigger than the screen width
-        if (w > screen_width)
-        {
-            // set the width to the screen width
-            w = screen_width;
-
-            // recalculate height using the calculated aspect ratio and the screen width
-            h = ((int) rint(w / aspect_ratio)) & -3;
-        }
-
-        // TODO: Add full screen support
-        x = (screen_width - w);
-        y = (screen_height - h);
-
-        // check the number of frames to decode was not exceeded
-        if (++videoState->currentFrameIndex < videoState->maxFramesToDecode)
-        {
-            if (_DEBUG_)
-            {
-                // dump information about the frame being rendered
-                printf(
-                        "Frame %c (%d) pts %" PRId64 " dts %" PRId64 " key_frame %d [coded_picture_number %d, display_picture_number %d, %dx%d]\n",
-                        av_get_picture_type_char(videoPicture->frame->pict_type),
-                        videoState->video_ctx->frame_number,
-                        videoPicture->frame->pts,
-                        videoPicture->frame->pkt_dts,
-                        videoPicture->frame->key_frame,
-                        videoPicture->frame->coded_picture_number,
-                        videoPicture->frame->display_picture_number,
-                        videoPicture->frame->width,
-                        videoPicture->frame->height
-                );
-            }
-
-            // set blit area x and y coordinates, width and height
-            SDL_Rect rect;
-            rect.x = x;
-            rect.y = y;
-            rect.w = w;
-            rect.h = h;
-
-            // lock screen mutex
-            SDL_LockMutex(screen_mutex);
-
-            // update the texture with the new pixel data
-            SDL_UpdateYUVTexture(
-                    videoState->texture,
-                    &rect,
-                    videoPicture->frame->data[0],
-                    videoPicture->frame->linesize[0],
-                    videoPicture->frame->data[1],
-                    videoPicture->frame->linesize[1],
-                    videoPicture->frame->data[2],
-                    videoPicture->frame->linesize[2]
-            );
-
-            // clear the current rendering target with the drawing color
-            SDL_RenderClear(videoState->renderer);
-
-            // copy a portion of the texture to the current rendering target
-            SDL_RenderCopy(videoState->renderer, videoState->texture, NULL, NULL);
-
-            // update the screen with any rendering performed since the previous call
-            SDL_RenderPresent(videoState->renderer);
-
-            // unlock screen mutex
-            SDL_UnlockMutex(screen_mutex);
-        }
-        else
-        {
-            // create an SDLEvent of type FF_QUIT_EVENT
-            SDL_Event event;
-            event.type = FF_QUIT_EVENT;
-            event.user.data1 = videoState;
-
-            // push the event
-            SDL_PushEvent(&event);
-        }
-    }
 }
 
 /**
