@@ -37,3 +37,4 @@ add_executable(tutorial01 tutorial01.c)
 target_include_directories(tutorial01 PRIVATE ${FFMPEG_INCLUDE_DIRS})
 target_link_libraries(tutorial01 PRIVATE ${FFMPEG_LIBRARIES})
 
+message(FATAL_ERROR "${FFMPEG_LIBRARIES}")

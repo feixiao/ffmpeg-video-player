@@ -23,4 +23,4 @@ add_executable(tutorial07 tutorial07.c)
 # linking target tutorial07.
 ##
 target_include_directories(tutorial07 PRIVATE ${FFMPEG_INCLUDE_DIRS} ${SDL2_INCLUDE_DIRS})
-target_link_libraries(tutorial07 PRIVATE ${FFMPEG_LIBRARIES} ${SDL2_LIBRARIES} m)
+target_link_libraries(tutorial07 PRIVATE ${FFMPEG_LIBRARIES} /usr/local/Cellar/sdl2/2.0.12_1/lib/libSDL2.dylib m)
