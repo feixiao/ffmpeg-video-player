@@ -1,17 +1,12 @@
-
-
-#include <unistd.h>
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
-#include <time.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/avstring.h>
 #include <libavutil/time.h>
 #include <libavutil/opt.h>
 #include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
@@ -113,18 +108,12 @@ typedef struct VideoState
     uint8_t             audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) /2];
     unsigned int        audio_buf_size;
     unsigned int        audio_buf_index;
-//    AVFrame             audio_frame;
     AVPacket            audio_pkt;
-//    uint8_t *           audio_pkt_data;
-//    int                 audio_pkt_size;
     double              audio_clock;
-
-
     double              audio_diff_cum;
     double              audio_diff_avg_coef;
     double              audio_diff_threshold;
     int                 audio_diff_avg_count;
-
 
     /**
      * AV Sync.
@@ -159,7 +148,6 @@ typedef struct VideoState
 //     * Maximum number of frames to be decoded.
 //     */
     long    maxFramesToDecode;
-//    int     currentFrameIndex;
 } VideoState;
 
 /**
@@ -302,7 +290,7 @@ int main(int argc, char * argv[])
      * Initialize SDL.
      * New API: this implementation does not use deprecated SDL functionalities.
      */
-    int ret = SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
+    int ret = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER);
     if (ret != 0)
     {
         printf("Could not initialize SDL - %s\n.", SDL_GetError());
@@ -497,19 +485,12 @@ int decode_thread(void * arg)
     if (_DEBUG_)
         av_dump_format(pFormatCtx, 0, videoState->filename, 0);
 
-    // video and audio stream indexes
-    int videoStream = -1;
+    // audio stream indexes
     int audioStream = -1;
 
     // loop through the streams that have been found
     for (int i = 0; i < pFormatCtx->nb_streams; i++)
     {
-        // look for the video stream
-        if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && videoStream < 0)
-        {
-            videoStream = i;
-        }
-
         // look for the audio stream
         if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audioStream < 0)
         {
@@ -535,7 +516,6 @@ int decode_thread(void * arg)
             goto fail;
         }
     }
-
 
 
     // alloc the AVPacket used to read the media file
