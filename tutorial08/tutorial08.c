@@ -689,6 +689,8 @@ int stream_component_open(VideoState * videoState, int stream_index)
         SDL_AudioSpec wanted_specs;
         SDL_AudioSpec specs;
 
+    
+
         // Set audio settings from codec info
         wanted_specs.freq = codecCtx->sample_rate;
         wanted_specs.format = AUDIO_S16SYS;
