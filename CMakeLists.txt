@@ -22,16 +22,19 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/Modules)
 # Find FFmpeg include directories and link libraries.
 ##
 find_package(FFMPEG REQUIRED)
+message ([STATUS] "FFMPEG_INCLUDE_DIRS" ${FFMPEG_INCLUDE_DIRS})
+message ([STATUS] "FFMPEG_LIBRARIES" ${FFMPEG_LIBRARIES})
 
-##
-# Find SDL include directories and link libraries.
-##
-find_package(SDL REQUIRED)
 
 ##
 # Find SDL2 include directories and link libraries.
 ##
 find_package(SDL2 REQUIRED)
+
+# # Add log messages
+message ([STATUS] "SDL2_INCLUDE_DIR" ${SDL2_INCLUDE_DIRS})
+message ([STATUS] "SDL2_LIBRARYS" ${SDL2_LIBRARIES})
+
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     add_definitions("-Wno-invalid-source-encoding")
@@ -54,12 +57,12 @@ endif ()
 # Add subdirectories to the build.
 ##
 add_subdirectory(tutorial01)
-#add_subdirectory(tutorial02)
-# add_subdirectory(tutorial03)
-# add_subdirectory(tutorial04)
-# add_subdirectory(tutorial05)
-# add_subdirectory(tutorial06)
-# add_subdirectory(tutorial07)
-# add_subdirectory(tutorial08)
-# add_subdirectory(player)
-# add_subdirectory(resampling)
+add_subdirectory(tutorial02)
+add_subdirectory(tutorial03)
+add_subdirectory(tutorial04)
+add_subdirectory(tutorial05)
+add_subdirectory(tutorial06)
+add_subdirectory(tutorial07)
+add_subdirectory(tutorial08)
+add_subdirectory(player)
+add_subdirectory(resampling)

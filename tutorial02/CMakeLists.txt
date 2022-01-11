@@ -13,17 +13,6 @@ project(tutorial02 C)
 ##
 set(CMAKE_C_STANDARD 99)
 
-##
-# Adds tutorial02-deprecated.c executable target.
-##
-add_executable(tutorial02-deprecated tutorial02-deprecated.c)
-
-##
-# Adds include directories to be used when compiling and libraries to be used when
-# linking target tutorial02-deprecated.
-##
-target_include_directories(tutorial02-deprecated PRIVATE ${FFMPEG_INCLUDE_DIRS} ${SDL_INCLUDE_DIRS})
-target_link_libraries(tutorial02-deprecated PRIVATE ${FFMPEG_LIBRARIES} ${SDL_LIBRARIES})
 
 ##
 # Adds tutorial02.c executable target.
