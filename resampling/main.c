@@ -82,7 +82,8 @@ int main(int argc, char **argv)
         ret = AVERROR(ENOMEM);
         goto end;
     }
-    /* set options */
+
+    /* 转换参数设置 */
     av_opt_set_int(swr_ctx, "in_channel_layout",    src_ch_layout, 0);
     av_opt_set_int(swr_ctx, "in_sample_rate",       src_rate, 0);
     av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", src_sample_fmt, 0);
@@ -95,13 +96,21 @@ int main(int argc, char **argv)
         goto end;
     }
     /* allocate source and destination samples buffers */
+
+    // 获取Layout对应的Channel数量
     src_nb_channels = av_get_channel_layout_nb_channels(src_ch_layout);
+
+    // 根据产生分配内存用于存储音频
     ret = av_samples_alloc_array_and_samples(&src_data, &src_linesize, src_nb_channels,
                                              src_nb_samples, src_sample_fmt, 0);
     if (ret < 0) {
         fprintf(stderr, "Could not allocate source samples\n");
         goto end;
     }
+
+
+
+    // 分配内存存储用于输出的音频
     /* compute the number of converted samples: buffering is avoided
      * ensuring that the output buffer will contain at least all the
      * converted input samples */
