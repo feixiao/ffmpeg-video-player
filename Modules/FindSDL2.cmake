@@ -1,3 +1,15 @@
+
+SET(SDL2_SEARCH_PATHS
+~/Library/Frameworks
+/Library/Frameworks
+/usr/local
+/usr
+/sw # Fink
+/opt/local # DarwinPorts
+/opt/csw # Blastwave
+/opt
+)
+
 ##
 # Find SDL2 Libraries.
 #
@@ -7,4 +19,3 @@
 #   SDL2_LIBRARIES    - Link these to use the required ffmpeg components.
 ##
 PKG_SEARCH_MODULE(SDL2 REQUIRED sdl2)
-
