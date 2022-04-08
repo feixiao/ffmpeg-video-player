@@ -11,5 +11,5 @@
 
 PKG_SEARCH_MODULE(SDL2 REQUIRED sdl2)
 if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
-    set(SDL2_LIBRARIES /usr/local/Cellar/sdl2/2.0.12_1/lib/libSDL2.dylib)
+    set(SDL2_LIBRARIES /opt/homebrew/opt/sdl2/lib/libSDL2.dylib)
 endif ()

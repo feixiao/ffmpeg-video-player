@@ -125,3 +125,20 @@ else()
     set(${FFMPEG_FOUND} FALSE)
 endif(SWRESAMPLE_INCLUDE_DIR AND SWRESAMPLE_LIBRARY)
 
+
+
+if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    #brew install ffmpeg@4
+    set(FFMPEG_INCLUDE_DIRS /opt/homebrew/opt/ffmpeg@4/include)
+    set(FFMPEG_LIB_BASE /opt/homebrew/opt/ffmpeg@4/lib)
+    # FFMPEG_LIBRARIES
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavcodec.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavdevice.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavfilter.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavformat.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavresample.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libavutil.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libpostproc.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libswresample.dylib)
+     list(APPEND FFMPEG_LIBRARIES ${FFMPEG_LIB_BASE}/libswscale.dylib)
+endif ()
