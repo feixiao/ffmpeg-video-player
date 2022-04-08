@@ -8,6 +8,7 @@ cmake_minimum_required(VERSION 3.11)
 ##
 project(FFmpeg_Video_Player C)
 
+set(CMAKE_C_FLAGS "-std=c20")
 ##
 # Include module pkg-config for CMake.
 ##
@@ -66,7 +67,7 @@ add_subdirectory(tutorial03)
 add_subdirectory(tutorial04)
 add_subdirectory(tutorial05)
 add_subdirectory(tutorial06)
-# add_subdirectory(tutorial07)
-# add_subdirectory(tutorial08)
+add_subdirectory(tutorial07)
+add_subdirectory(tutorial08)
 add_subdirectory(player)
-# add_subdirectory(resampling)
+add_subdirectory(resampling)

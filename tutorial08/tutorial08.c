@@ -556,7 +556,7 @@ int decode_thread(void * arg)
 
             if (ret < 0)
             {
-                fprintf(stderr, "%s: error while seeking\n", videoState->pFormatCtx->filename);
+                fprintf(stderr, "%s: error while seeking\n", videoState->filename);
             }
             else
             {
@@ -1171,7 +1171,7 @@ static void packet_queue_flush(PacketQueue * queue)
     for (pkt = queue->first_pkt; pkt != NULL; pkt = pkt1)
     {
         pkt1 = pkt->next;
-        av_free_packet(&pkt->pkt);
+        // av_free_packet(&pkt->pkt);
         av_freep(&pkt);
     }
 
