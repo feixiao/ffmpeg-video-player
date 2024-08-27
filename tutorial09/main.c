@@ -79,6 +79,10 @@ static void decode(AVCodecContext *dec_ctx, AVPacket *packet, AVFrame *frame,
   }
 }
 
+// 运行
+// ./tutorial09/tutorial09 ../人世间.aac ../人世间.pcm
+// 验证数据
+// ffplay -ar 48000 -ac 2 -f f32le 人世间.pcm
 int main(int argc, char **argv) {
   if (argc != 3) {
     printf("usage: %s <intput file> <out file>\n", argv[0]);
