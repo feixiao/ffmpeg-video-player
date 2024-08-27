@@ -19,9 +19,12 @@ set(CMAKE_C_STANDARD 99)
 ##
 add_executable(tutorial03-resampled tutorial03-resampled.c)
 
+
 ##
 # Adds include directories to be used when compiling and libraries to be used when
 # linking target tutorial03-resampled.
 ##
 target_include_directories(tutorial03-resampled PRIVATE ${FFMPEG_INCLUDE_DIRS} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(tutorial03-resampled PRIVATE ${FFMPEG_LIBRARIES} ${SDL2_LIBRARIES})
+
+

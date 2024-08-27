@@ -5,27 +5,24 @@
  *           This implementation uses the new FFmpeg API.
  *
  *           Compiled using
- *               $ gcc -o tutorial01 tutorial01.c -lavutil -lavformat -lavcodec -lswscale -lz -lm
- *           on Arch Linux.
- *           You can also compile all the source files in this repo using the
- *           provided CMake files using
- *           	$ cmake CMakeLists.txt -Bcmake-build-debug
- *           	$ cd cmake-build-debug/
- *           	$ make
+ *               $ gcc -o tutorial01 tutorial01.c -lavutil -lavformat -lavcodec
+ *-lswscale -lz -lm on Arch Linux. You can also compile all the source files in
+ *this repo using the provided CMake files using $ cmake CMakeLists.txt
+ *-Bcmake-build-debug $ cd cmake-build-debug/ $ make
  *
  *   Author: Rambod Rahmani <rambodrahmani@autistici.org>
  *           Created on 8/6/18.
  *
  **/
 
-#include <stdio.h>
 #include <libavcodec/avcodec.h>
-#include <libavutil/imgutils.h>
 #include <libavformat/avformat.h>
+#include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
+#include <stdio.h>
 
 void printHelpMenu();
-void saveFrame(AVFrame * avFrame, int width, int height, int frameIndex);
+void saveFrame(AVFrame *avFrame, int width, int height, int frameIndex);
 
 /**
  * Entry point.
@@ -35,403 +32,369 @@ void saveFrame(AVFrame * avFrame, int width, int height, int frameIndex);
  *
  * @return          execution exit code.
  */
-int main(int argc, char * argv[])
-{
-    // with ffmpeg, you have to first initialize the library.
-    // 'av_register_all' is deprecated just omit this function call in ffmpeg
-    // 4.0 and later.
-    // av_register_all();  // [0]
+int main(int argc, char *argv[]) {
+  // with ffmpeg, you have to first initialize the library.
+  // 'av_register_all' is deprecated just omit this function call in ffmpeg
+  // 4.0 and later.
+  // av_register_all();  // [0]
 
-    // we get our filename from the first argument, check if the file name is
-    // provided, show help menu if not
-    if ( !(argc > 2) )
+  // we get our filename from the first argument, check if the file name is
+  // provided, show help menu if not
+  if (!(argc > 2)) {
+    // wrong arguments, print help menu
+    printHelpMenu();
+
+    // exit with error
+    return -1;
+  }
+
+  // declare the AVFormatContext
+  AVFormatContext *pFormatCtx = NULL;  // [1]
+
+  // now we can actually open the file:
+  // the minimum information required to open a file is its URL, which is
+  // passed to avformat_open_input(), as in the following code:
+  int ret = avformat_open_input(&pFormatCtx, argv[1], NULL, NULL);  // [2]
+  if (ret < 0) {
+    // couldn't open file
+    printf("Could not open file %s\n", argv[1]);
+
+    // exit with error
+    return -1;
+  }
+
+  // The call to avformat_open_input(), only looks at the header, so next we
+  // need to check out the stream information in the file.:
+  // Retrieve stream information
+  ret = avformat_find_stream_info(pFormatCtx, NULL);  //[3]
+  if (ret < 0) {
+    // couldn't find stream information
+    printf("Could not find stream information %s\n", argv[1]);
+
+    // exit with error
+    return -1;
+  }
+
+  // We introduce a handy debugging function to show us what's inside dumping
+  // information about file onto standard error
+  av_dump_format(pFormatCtx, 0, argv[1], 0);  // [4]
+
+  // Now pFormatCtx->streams is just an array of pointers, of size
+  // pFormatCtx->nb_streams, so let's walk through it until we find a video
+  // stream.
+  int i;
+
+  // The stream's information about the codec is in what we call the
+  // "codec context." This contains all the information about the codec that
+  // the stream is using
+  AVCodecContext *pCodecCtxOrig = NULL;
+  AVCodecContext *pCodecCtx = NULL;
+
+  // Find the first video stream
+  int videoStream = -1;
+  for (i = 0; i < pFormatCtx->nb_streams; i++) {
+    // check the General type of the encoded data to match
+    // AVMEDIA_TYPE_VIDEO
+    if (pFormatCtx->streams[i]->codecpar->codec_type ==
+        AVMEDIA_TYPE_VIDEO)  // [5]
     {
-        // wrong arguments, print help menu
-        printHelpMenu();
+      videoStream = i;
+      break;
+    }
+  }
 
-        // exit with error
+  if (videoStream == -1) {
+    // didn't find a video stream
+    return -1;
+  }
+
+  /**
+   * New API.
+   * This implementation uses the new API.
+   * Please refer to tutorial01-deprecated.c for an implementation using the
+   * deprecated FFmpeg API.
+   */
+
+  // Get a pointer to the codec context for the video stream.
+  // AVStream::codec deprecated
+  // https://ffmpeg.org/pipermail/libav-user/2016-October/009801.html
+  // pCodecCtxOrig = pFormatCtx->streams[videoStream]->codec;
+
+  // But we still have to find the actual codec and open it:
+  AVCodec *pCodec = NULL;
+
+  // Find the decoder for the video stream
+  pCodec = avcodec_find_decoder(
+      pFormatCtx->streams[videoStream]->codecpar->codec_id);  // [6]
+  if (pCodec == NULL) {
+    // codec not found
+    printf("Unsupported codec!\n");
+
+    // exit with error
+    return -1;
+  }
+
+  pCodecCtxOrig = avcodec_alloc_context3(pCodec);  // [7]
+  ret = avcodec_parameters_to_context(
+      pCodecCtxOrig, pFormatCtx->streams[videoStream]->codecpar);
+
+  /**
+   * Note that we must not use the AVCodecContext from the video stream
+   * directly! So we have to use avcodec_copy_context() to copy the
+   * context to a new location (after allocating memory for it, of
+   * course).
+   */
+
+  // Copy context
+  // avcodec_copy_context deprecation
+  // http://ffmpeg.org/pipermail/libav-user/2017-September/010615.html
+  // ret = avcodec_copy_context(pCodecCtx, pCodecCtxOrig);
+  pCodecCtx = avcodec_alloc_context3(pCodec);  // [7]
+  ret = avcodec_parameters_to_context(
+      pCodecCtx, pFormatCtx->streams[videoStream]->codecpar);
+  if (ret != 0) {
+    // error copying codec context
+    printf("Could not copy codec context.\n");
+
+    // exit with error
+    return -1;
+  }
+
+  // Open codec
+  ret = avcodec_open2(pCodecCtx, pCodec, NULL);  // [8]
+  if (ret < 0) {
+    // Could not open codec
+    printf("Could not open codec.\n");
+
+    // exit with error
+    return -1;
+  }
+
+  // Now we need a place to actually store the frame:
+  AVFrame *pFrame = NULL;
+
+  // Allocate video frame
+  pFrame = av_frame_alloc();  // [9]
+  if (pFrame == NULL) {
+    // Could not allocate frame
+    printf("Could not allocate frame.\n");
+
+    // exit with error
+    return -1;
+  }
+
+  /**
+   * Since we're planning to output PPM files, which are stored in 24-bit
+   * RGB, we're going to have to convert our frame from its native format
+   * to RGB. ffmpeg will do these conversions for us. For most projects
+   * (including ours) we're going to want to convert our initial frame to
+   * a specific format. Let's allocate a frame for the converted frame
+   * now.
+   */
+
+  // Allocate an AVFrame structure
+  AVFrame *pFrameRGB = NULL;
+  pFrameRGB = av_frame_alloc();
+  if (pFrameRGB == NULL) {
+    // Could not allocate frame
+    printf("Could not allocate frame.\n");
+
+    // exit with error
+    return -1;
+  }
+
+  // Even though we've allocated the frame, we still need a place to put
+  // the raw data when we convert it. We use avpicture_get_size to get
+  // the size we need, and allocate the space manually:
+  uint8_t *buffer = NULL;
+  int numBytes;
+
+  // Determine required buffer size and allocate buffer
+  // numBytes = avpicture_get_size(AV_PIX_FMT_RGB24, pCodecCtx->width,
+  // pCodecCtx->height);
+  // https://ffmpeg.org/pipermail/ffmpeg-devel/2016-January/187299.html
+  // what is 'linesize alignment' meaning?:
+  // https://stackoverflow.com/questions/35678041/what-is-linesize-alignment-meaning
+  numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, pCodecCtx->width,
+                                      pCodecCtx->height, 32);  // [10]
+  buffer = (uint8_t *)av_malloc(numBytes * sizeof(uint8_t));   // [11]
+
+  /**
+   * Now we use avpicture_fill() to associate the frame with our newly
+   * allocated buffer. About the AVPicture cast: the AVPicture struct is
+   * a subset of the AVFrame struct - the beginning of the AVFrame struct
+   * is identical to the AVPicture struct.
+   */
+  // Assign appropriate parts of buffer to image planes in pFrameRGB
+  // Note that pFrameRGB is an AVFrame, but AVFrame is a superset
+  // of AVPicture
+  // Picture data structure - Deprecated: use AVFrame or imgutils functions
+  // instead
+  // https://www.ffmpeg.org/doxygen/3.0/structAVPicture.html#a40dfe654d0f619d05681aed6f99af21b
+  // avpicture_fill( // [12]
+  //     (AVPicture *)pFrameRGB,
+  //     buffer,
+  //     AV_PIX_FMT_RGB24,
+  //     pCodecCtx->width,
+  //     pCodecCtx->height
+  // );
+  av_image_fill_arrays(  // [12]
+      pFrameRGB->data, pFrameRGB->linesize, buffer, AV_PIX_FMT_RGB24,
+      pCodecCtx->width, pCodecCtx->height, 32);
+
+  // Finally! Now we're ready to read from the stream!
+
+  /**
+   * What we're going to do is read through the entire video stream by
+   * reading in the packet, decoding it into our frame, and once our
+   * frame is complete, we will convert and save it.
+   */
+
+  struct SwsContext *sws_ctx = NULL;
+
+  AVPacket *pPacket = av_packet_alloc();
+  if (pPacket == NULL) {
+    // couldn't allocate packet
+    printf("Could not alloc packet,\n");
+
+    // exit with error
+    return -1;
+  }
+
+  // initialize SWS context for software scaling
+  sws_ctx = sws_getContext(  // [13]
+      pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt, pCodecCtx->width,
+      pCodecCtx->height,
+      AV_PIX_FMT_RGB24,  // sws_scale destination color scheme
+      SWS_BILINEAR, NULL, NULL, NULL);
+
+  // The numer in the argv[2] array is in a string representation. We
+  // need to convert it to an integer.
+  int maxFramesToDecode;
+  sscanf(argv[2], "%d", &maxFramesToDecode);
+
+  /**
+   * The process, again, is simple: av_read_frame() reads in a packet and
+   * stores it in the AVPacket struct. Note that we've only allocated the
+   * packet structure - ffmpeg allocates the internal data for us, which
+   * is pointed to by packet.data. This is freed by the av_free_packet()
+   * later. avcodec_decode_video() converts the packet to a frame for us.
+   * However, we might not have all the information we need for a frame
+   * after decoding a packet, so avcodec_decode_video() sets
+   * frameFinished for us when we have decoded enough packets the next
+   * frame.
+   * Finally, we use sws_scale() to convert from the native format
+   * (pCodecCtx->pix_fmt) to RGB. Remember that you can cast an AVFrame
+   * pointer to an AVPicture pointer. Finally, we pass the frame and
+   * height and width information to our SaveFrame function.
+   */
+
+  i = 0;
+  while (av_read_frame(pFormatCtx, pPacket) >= 0)  // [14]
+  {
+    // Is this a packet from the video stream?
+    if (pPacket->stream_index == videoStream) {
+      // Decode video frame
+      // avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &pPacket);
+      // Deprecated: Use avcodec_send_packet() and avcodec_receive_frame().
+      ret = avcodec_send_packet(pCodecCtx, pPacket);  // [15]
+      if (ret < 0) {
+        // could not send packet for decoding
+        printf("Error sending packet for decoding.\n");
+
+        // exit with eror
         return -1;
-    }
+      }
 
-    // declare the AVFormatContext
-    AVFormatContext * pFormatCtx = NULL; // [1]
+      while (ret >= 0) {
+        ret = avcodec_receive_frame(pCodecCtx, pFrame);  // [15]
 
-    // now we can actually open the file:
-    // the minimum information required to open a file is its URL, which is
-    // passed to avformat_open_input(), as in the following code:
-    int ret = avformat_open_input(&pFormatCtx, argv[1], NULL, NULL);    // [2]
-    if (ret < 0)
-    {
-        // couldn't open file
-        printf("Could not open file %s\n", argv[1]);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+          // EOF exit loop
+          break;
+        } else if (ret < 0) {
+          // could not decode packet
+          printf("Error while decoding.\n");
 
-        // exit with error
-        return -1;
-    }
-
-    // The call to avformat_open_input(), only looks at the header, so next we
-    // need to check out the stream information in the file.:
-    // Retrieve stream information
-    ret = avformat_find_stream_info(pFormatCtx, NULL);  //[3]
-    if (ret < 0)
-    {
-        // couldn't find stream information
-        printf("Could not find stream information %s\n", argv[1]);
-
-        // exit with error
-        return -1;
-    }
-
-    // We introduce a handy debugging function to show us what's inside dumping
-    // information about file onto standard error
-    av_dump_format(pFormatCtx, 0, argv[1], 0);  // [4]
-
-    // Now pFormatCtx->streams is just an array of pointers, of size
-    // pFormatCtx->nb_streams, so let's walk through it until we find a video
-    // stream.
-    int i;
-
-    // The stream's information about the codec is in what we call the
-    // "codec context." This contains all the information about the codec that
-    // the stream is using
-    AVCodecContext * pCodecCtxOrig = NULL;
-    AVCodecContext * pCodecCtx = NULL;
-
-    // Find the first video stream
-    int videoStream = -1;
-    for (i = 0; i < pFormatCtx->nb_streams; i++)
-    {
-        // check the General type of the encoded data to match
-	// AVMEDIA_TYPE_VIDEO
-        if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) // [5]
-        {
-            videoStream = i;
-            break;
-        }
-    }
-
-    if (videoStream == -1)
-    {
-        // didn't find a video stream
-        return -1;
-    }
-
-    /**
-     * New API.
-     * This implementation uses the new API.
-     * Please refer to tutorial01-deprecated.c for an implementation using the
-     * deprecated FFmpeg API.
-     */
-
-    // Get a pointer to the codec context for the video stream.
-    // AVStream::codec deprecated
-    // https://ffmpeg.org/pipermail/libav-user/2016-October/009801.html
-    // pCodecCtxOrig = pFormatCtx->streams[videoStream]->codec;
-
-    // But we still have to find the actual codec and open it:
-    AVCodec * pCodec = NULL;
-
-    // Find the decoder for the video stream
-    pCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id); // [6]
-    if (pCodec == NULL)
-    {
-        // codec not found
-        printf("Unsupported codec!\n");
-
-        // exit with error
-        return -1;
-    }
-
-    pCodecCtxOrig = avcodec_alloc_context3(pCodec); // [7]
-    ret = avcodec_parameters_to_context(pCodecCtxOrig, pFormatCtx->streams[videoStream]->codecpar);
-
-    /**
-     * Note that we must not use the AVCodecContext from the video stream
-     * directly! So we have to use avcodec_copy_context() to copy the
-     * context to a new location (after allocating memory for it, of
-     * course).
-     */
-
-    // Copy context
-    // avcodec_copy_context deprecation
-    // http://ffmpeg.org/pipermail/libav-user/2017-September/010615.html
-    //ret = avcodec_copy_context(pCodecCtx, pCodecCtxOrig);
-    pCodecCtx = avcodec_alloc_context3(pCodec); // [7]
-    ret = avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[videoStream]->codecpar);
-    if (ret != 0)
-    {
-        // error copying codec context
-        printf("Could not copy codec context.\n");
-
-        // exit with error
-        return -1;
-    }
-
-    // Open codec
-    ret = avcodec_open2(pCodecCtx, pCodec, NULL);   // [8]
-    if (ret < 0)
-    {
-        // Could not open codec
-        printf("Could not open codec.\n");
-
-        // exit with error
-        return -1;
-    }
-
-    // Now we need a place to actually store the frame:
-    AVFrame * pFrame = NULL;
-
-    // Allocate video frame
-    pFrame = av_frame_alloc();  // [9]
-    if (pFrame == NULL)
-    {
-        // Could not allocate frame
-        printf("Could not allocate frame.\n");
-
-        // exit with error
-        return -1;
-    }
-
-    /**
-     * Since we're planning to output PPM files, which are stored in 24-bit
-     * RGB, we're going to have to convert our frame from its native format
-     * to RGB. ffmpeg will do these conversions for us. For most projects
-     * (including ours) we're going to want to convert our initial frame to
-     * a specific format. Let's allocate a frame for the converted frame
-     * now.
-     */
-
-    // Allocate an AVFrame structure
-    AVFrame * pFrameRGB = NULL;
-    pFrameRGB = av_frame_alloc();
-    if (pFrameRGB == NULL)
-    {
-        // Could not allocate frame
-        printf("Could not allocate frame.\n");
-
-        // exit with error
-        return -1;
-    }
-
-    // Even though we've allocated the frame, we still need a place to put
-    // the raw data when we convert it. We use avpicture_get_size to get
-    // the size we need, and allocate the space manually:
-    uint8_t * buffer = NULL;
-    int numBytes;
-
-    // Determine required buffer size and allocate buffer
-    // numBytes = avpicture_get_size(AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
-    // https://ffmpeg.org/pipermail/ffmpeg-devel/2016-January/187299.html
-    // what is 'linesize alignment' meaning?:
-    // https://stackoverflow.com/questions/35678041/what-is-linesize-alignment-meaning
-    numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height, 32); // [10]
-    buffer = (uint8_t *) av_malloc(numBytes * sizeof(uint8_t));    // [11]
-
-    /**
-    * Now we use avpicture_fill() to associate the frame with our newly
-    * allocated buffer. About the AVPicture cast: the AVPicture struct is
-    * a subset of the AVFrame struct - the beginning of the AVFrame struct
-    * is identical to the AVPicture struct.
-    */
-    // Assign appropriate parts of buffer to image planes in pFrameRGB
-    // Note that pFrameRGB is an AVFrame, but AVFrame is a superset
-    // of AVPicture
-    // Picture data structure - Deprecated: use AVFrame or imgutils functions
-    // instead
-    // https://www.ffmpeg.org/doxygen/3.0/structAVPicture.html#a40dfe654d0f619d05681aed6f99af21b
-    // avpicture_fill( // [12]
-    //     (AVPicture *)pFrameRGB,
-    //     buffer,
-    //     AV_PIX_FMT_RGB24,
-    //     pCodecCtx->width,
-    //     pCodecCtx->height
-    // );
-    av_image_fill_arrays( // [12]
-        pFrameRGB->data,
-        pFrameRGB->linesize,
-        buffer,
-        AV_PIX_FMT_RGB24,
-        pCodecCtx->width,
-        pCodecCtx->height,
-        32
-    );
-
-    // Finally! Now we're ready to read from the stream!
-
-    /**
-     * What we're going to do is read through the entire video stream by
-     * reading in the packet, decoding it into our frame, and once our
-     * frame is complete, we will convert and save it.
-     */
-
-    struct SwsContext * sws_ctx = NULL;
-
-    AVPacket * pPacket = av_packet_alloc();
-    if (pPacket == NULL)
-    {
-        // couldn't allocate packet
-        printf("Could not alloc packet,\n");
-
-        // exit with error
-        return -1;
-    }
-
-    // initialize SWS context for software scaling
-    sws_ctx = sws_getContext(   // [13]
-        pCodecCtx->width,
-        pCodecCtx->height,
-        pCodecCtx->pix_fmt,
-        pCodecCtx->width,
-        pCodecCtx->height,
-        AV_PIX_FMT_RGB24,   // sws_scale destination color scheme
-        SWS_BILINEAR,
-        NULL,
-        NULL,
-        NULL
-    );
-
-    // The numer in the argv[2] array is in a string representation. We
-    // need to convert it to an integer.
-    int maxFramesToDecode;
-    sscanf (argv[2], "%d", &maxFramesToDecode);
-
-    /**
-     * The process, again, is simple: av_read_frame() reads in a packet and
-     * stores it in the AVPacket struct. Note that we've only allocated the
-     * packet structure - ffmpeg allocates the internal data for us, which
-     * is pointed to by packet.data. This is freed by the av_free_packet()
-     * later. avcodec_decode_video() converts the packet to a frame for us.
-     * However, we might not have all the information we need for a frame
-     * after decoding a packet, so avcodec_decode_video() sets
-     * frameFinished for us when we have decoded enough packets the next
-     * frame.
-     * Finally, we use sws_scale() to convert from the native format
-     * (pCodecCtx->pix_fmt) to RGB. Remember that you can cast an AVFrame
-     * pointer to an AVPicture pointer. Finally, we pass the frame and
-     * height and width information to our SaveFrame function.
-     */
-
-    i = 0;
-    while (av_read_frame(pFormatCtx, pPacket) >= 0)  // [14]
-    {
-        // Is this a packet from the video stream?
-        if (pPacket->stream_index == videoStream)
-        {
-            // Decode video frame
-            // avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &pPacket);
-            // Deprecated: Use avcodec_send_packet() and avcodec_receive_frame().
-            ret = avcodec_send_packet(pCodecCtx, pPacket);    // [15]
-            if (ret < 0)
-            {
-                // could not send packet for decoding
-                printf("Error sending packet for decoding.\n");
-
-                // exit with eror
-                return -1;
-            }
-
-            while (ret >= 0)
-            {
-                ret = avcodec_receive_frame(pCodecCtx, pFrame);   // [15]
-
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                {
-                    // EOF exit loop
-                    break;
-                }
-                else if (ret < 0)
-                {
-                    // could not decode packet
-                    printf("Error while decoding.\n");
-
-                    // exit with error
-                    return -1;
-                }
-
-                // Convert the image from its native format to RGB
-                sws_scale(  // [16]
-                    sws_ctx,
-                    (uint8_t const * const *)pFrame->data,
-                    pFrame->linesize,
-                    0,
-                    pCodecCtx->height,
-                    pFrameRGB->data,
-                    pFrameRGB->linesize
-                );
-
-                // Save the frame to disk
-                if (++i <= maxFramesToDecode)
-                {
-                    // save the read AVFrame into ppm file
-                    saveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
-
-                    // print log information
-                    printf(
-                        "Frame %c (%d) pts %d dts %d key_frame %d "
-			"[coded_picture_number %d, display_picture_number %d,"
-			" %dx%d]\n",
-                        av_get_picture_type_char(pFrame->pict_type),
-                        pCodecCtx->frame_number,
-                        pFrameRGB->pts,
-                        pFrameRGB->pkt_dts,
-                        pFrameRGB->key_frame,
-                        pFrameRGB->coded_picture_number,
-                        pFrameRGB->display_picture_number,
-                        pCodecCtx->width,
-                        pCodecCtx->height
-                    );
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            if (i > maxFramesToDecode)
-            {
-                // exit loop and terminate
-                break;
-            }
+          // exit with error
+          return -1;
         }
 
-        // Free the packet that was allocated by av_read_frame
-        // [FFmpeg-cvslog] avpacket: Replace av_free_packet with
-        // av_packet_unref
-        // https://lists.ffmpeg.org/pipermail/ffmpeg-cvslog/2015-October/094920.html
-        av_packet_unref(pPacket);
+        // Convert the image from its native format to RGB
+        sws_scale(  // [16]
+            sws_ctx, (uint8_t const *const *)pFrame->data, pFrame->linesize, 0,
+            pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
+
+        // Save the frame to disk
+        if (++i <= maxFramesToDecode) {
+          // save the read AVFrame into ppm file
+          saveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
+
+          // print log information
+          //         printf(
+          //             "Frame %c (%d) pts %d dts %d key_frame %d "
+          // "[coded_picture_number %d, display_picture_number %d,"
+          // " %dx%d]\n",
+          //             av_get_picture_type_char(pFrame->pict_type),
+          //             pCodecCtx->frame_number,
+          //             pFrameRGB->pts,
+          //             pFrameRGB->pkt_dts,
+          //             pFrameRGB->key_frame,
+          //             pFrameRGB->coded_picture_number,
+          //             pFrameRGB->display_picture_number,
+          //             pCodecCtx->width,
+          //             pCodecCtx->height
+          //         );
+        } else {
+          break;
+        }
+      }
+
+      if (i > maxFramesToDecode) {
+        // exit loop and terminate
+        break;
+      }
     }
 
-    /**
-     * Cleanup.
-     */
+    // Free the packet that was allocated by av_read_frame
+    // [FFmpeg-cvslog] avpacket: Replace av_free_packet with
+    // av_packet_unref
+    // https://lists.ffmpeg.org/pipermail/ffmpeg-cvslog/2015-October/094920.html
+    av_packet_unref(pPacket);
+  }
 
-    // Free the RGB image
-    av_free(buffer);
-    av_frame_free(&pFrameRGB);
-    av_free(pFrameRGB);
+  /**
+   * Cleanup.
+   */
 
-    // Free the YUV frame
-    av_frame_free(&pFrame);
-    av_free(pFrame);
+  // Free the RGB image
+  av_free(buffer);
+  av_frame_free(&pFrameRGB);
+  av_free(pFrameRGB);
 
-    // Close the codecs
-    avcodec_close(pCodecCtx);
-    avcodec_close(pCodecCtxOrig);
+  // Free the YUV frame
+  av_frame_free(&pFrame);
+  av_free(pFrame);
 
-    // Close the video file
-    avformat_close_input(&pFormatCtx);
+  // Close the codecs
+  avcodec_close(pCodecCtx);
+  avcodec_close(pCodecCtxOrig);
 
-    return 0;
+  // Close the video file
+  avformat_close_input(&pFormatCtx);
+
+  return 0;
 }
 
 /**
  * Print help menu containing usage information.
  */
-void printHelpMenu()
-{
-    printf("Invalid arguments.\n\n");
-    printf("Usage: ./tutorial01 <filename> <max-frames-to-decode>\n\n");
-    printf("e.g: ./tutorial01 /home/rambodrahmani/Videos/Labrinth-Jealous.mp4 200\n");
+void printHelpMenu() {
+  printf("Invalid arguments.\n\n");
+  printf("Usage: ./tutorial01 <filename> <max-frames-to-decode>\n\n");
+  printf(
+      "e.g: ./tutorial01 /home/rambodrahmani/Videos/Labrinth-Jealous.mp4 "
+      "200\n");
 }
 
 /**
@@ -439,94 +402,92 @@ void printHelpMenu()
  *
  * @param   avFrame     the AVFrame to be saved.
  * @param   width       the given frame width as obtained by the AVCodecContext.
- * @param   height      the given frame height as obtained by the AVCodecContext.
+ * @param   height      the given frame height as obtained by the
+ * AVCodecContext.
  * @param   frameIndex  the given frame index.
  */
-void saveFrame(AVFrame *avFrame, int width, int height, int frameIndex)
-{
-    FILE * pFile;
-    char szFilename[32];
-    int  y;
+void saveFrame(AVFrame *avFrame, int width, int height, int frameIndex) {
+  FILE *pFile;
+  char szFilename[32];
+  int y;
 
-    /**
-     * We do a bit of standard file opening, etc., and then write the RGB data.
-     * We write the file one line at a time. A PPM file is simply a file that
-     * has RGB information laid out in a long string. If you know HTML colors,
-     * it would be like laying out the color of each pixel end to end like
-     * #ff0000#ff0000.... would be a red screen. (It's stored in binary and
-     * without the separator, but you get the idea.) The header indicated how
-     * wide and tall the image is, and the max size of the RGB values.
-     */
+  /**
+   * We do a bit of standard file opening, etc., and then write the RGB data.
+   * We write the file one line at a time. A PPM file is simply a file that
+   * has RGB information laid out in a long string. If you know HTML colors,
+   * it would be like laying out the color of each pixel end to end like
+   * #ff0000#ff0000.... would be a red screen. (It's stored in binary and
+   * without the separator, but you get the idea.) The header indicated how
+   * wide and tall the image is, and the max size of the RGB values.
+   */
 
-    // Open file
-    sprintf(szFilename, "frame%d.ppm", frameIndex);
-    pFile = fopen(szFilename, "wb");
-    if (pFile == NULL)
-    {
-        return;
-    }
+  // Open file
+  sprintf(szFilename, "frame%d.ppm", frameIndex);
+  pFile = fopen(szFilename, "wb");
+  if (pFile == NULL) {
+    return;
+  }
 
-    // Write header
-    fprintf(pFile, "P6\n%d %d\n255\n", width, height);
+  // Write header
+  fprintf(pFile, "P6\n%d %d\n255\n", width, height);
 
-    // Write pixel data
-    for (y = 0; y < height; y++)
-    {
-        fwrite(avFrame->data[0] + y * avFrame->linesize[0], 1, width * 3, pFile);
-    }
+  // Write pixel data
+  for (y = 0; y < height; y++) {
+    fwrite(avFrame->data[0] + y * avFrame->linesize[0], 1, width * 3, pFile);
+  }
 
-    // Close file
-    fclose(pFile);
+  // Close file
+  fclose(pFile);
 }
 
 // [0]
 /*
-* With ffmpeg, you have to first initialize the library.
-* Initialize libavformat and register all the muxers, demuxers and protocols.
-*
-* This registers all available file formats and codecs with the
-* library so they will be used automatically when a file with the
-* corresponding format/codec is opened. Note that you only need to call
-* av_register_all() once, so we do it here in main(). If you like, it's
-* possible to register only certain individual file formats and codecs,
-* but there's usually no reason why you would have to do that.
-*
-* av_register_all() has been deprecated in ffmpeg 4.0, it is no longer
-* necessary to call av_register_all().
-*/
+ * With ffmpeg, you have to first initialize the library.
+ * Initialize libavformat and register all the muxers, demuxers and protocols.
+ *
+ * This registers all available file formats and codecs with the
+ * library so they will be used automatically when a file with the
+ * corresponding format/codec is opened. Note that you only need to call
+ * av_register_all() once, so we do it here in main(). If you like, it's
+ * possible to register only certain individual file formats and codecs,
+ * but there's usually no reason why you would have to do that.
+ *
+ * av_register_all() has been deprecated in ffmpeg 4.0, it is no longer
+ * necessary to call av_register_all().
+ */
 
 // [1]
 /**
-* Format I/O context.
-*
-* Libavformat (lavf) is a library for dealing with various media container
-* formats. Its main two purposes are demuxing - i.e. splitting a media file
-* into component streams, and the reverse process of muxing - writing supplied
-* data in a specified container format. It also has an @ref lavf_io
-* "I/O module" which supports a number of protocols for accessing the data (e.g.
-* file, tcp, http and others). Before using lavf, you need to call
-* av_register_all() to register all compiled muxers, demuxers and protocols.
-* Unless you are absolutely sure you won't use libavformat's network
-* capabilities, you should also call avformat_network_init().
-*
-* Main lavf structure used for both muxing and demuxing is AVFormatContext,
-* which exports all information about the file being read or written. As with
-* most Libav structures, its size is not part of public ABI, so it cannot be
-* allocated on stack or directly with av_malloc(). To create an
-* AVFormatContext, use avformat_alloc_context() (some functions, like
-* avformat_open_input() might do that for you).
-*
-* Most importantly an AVFormatContext contains:
-* @li the @ref AVFormatContext.iformat "input" or @ref AVFormatContext.oformat
-* "output" format. It is either autodetected or set by user for input;
-* always set by user for output.
-* @li an @ref AVFormatContext.streams "array" of AVStreams, which describe all
-* elementary streams stored in the file. AVStreams are typically referred to
-* using their index in this array.
-* @li an @ref AVFormatContext.pb "I/O context". It is either opened by lavf or
-* set by user for input, always set by user for output (unless you are dealing
-* with an AVFMT_NOFILE format).
-*/
+ * Format I/O context.
+ *
+ * Libavformat (lavf) is a library for dealing with various media container
+ * formats. Its main two purposes are demuxing - i.e. splitting a media file
+ * into component streams, and the reverse process of muxing - writing supplied
+ * data in a specified container format. It also has an @ref lavf_io
+ * "I/O module" which supports a number of protocols for accessing the data
+ * (e.g. file, tcp, http and others). Before using lavf, you need to call
+ * av_register_all() to register all compiled muxers, demuxers and protocols.
+ * Unless you are absolutely sure you won't use libavformat's network
+ * capabilities, you should also call avformat_network_init().
+ *
+ * Main lavf structure used for both muxing and demuxing is AVFormatContext,
+ * which exports all information about the file being read or written. As with
+ * most Libav structures, its size is not part of public ABI, so it cannot be
+ * allocated on stack or directly with av_malloc(). To create an
+ * AVFormatContext, use avformat_alloc_context() (some functions, like
+ * avformat_open_input() might do that for you).
+ *
+ * Most importantly an AVFormatContext contains:
+ * @li the @ref AVFormatContext.iformat "input" or @ref AVFormatContext.oformat
+ * "output" format. It is either autodetected or set by user for input;
+ * always set by user for output.
+ * @li an @ref AVFormatContext.streams "array" of AVStreams, which describe all
+ * elementary streams stored in the file. AVStreams are typically referred to
+ * using their index in this array.
+ * @li an @ref AVFormatContext.pb "I/O context". It is either opened by lavf or
+ * set by user for input, always set by user for output (unless you are dealing
+ * with an AVFMT_NOFILE format).
+ */
 
 // [2]
 /**
@@ -706,10 +667,10 @@ void saveFrame(AVFrame *avFrame, int width, int height, int frameIndex)
  * Reading from an opened file:
  * Reading data from an opened AVFormatContext is done by repeatedly calling
  * av_read_frame() on it. Each call, if successful, will return an AVPacket
- * containing encoded data for one AVStream, identified by AVPacket.stream_index.
- * This packet may be passed straight into the libavcodec decoding functions
- * avcodec_decode_video2(), avcodec_decode_audio4() or avcodec_decode_subtitle2()
- * if the caller wishes to decode the data.
+ * containing encoded data for one AVStream, identified by
+ * AVPacket.stream_index. This packet may be passed straight into the libavcodec
+ * decoding functions avcodec_decode_video2(), avcodec_decode_audio4() or
+ * avcodec_decode_subtitle2() if the caller wishes to decode the data.
  *
  * AVPacket.pts, AVPacket.dts and AVPacket.duration timing information will be
  * set if known. They may also be unset (i.e. AV_NOPTS_VALUE for pts/dts, 0 for
@@ -787,4 +748,3 @@ void saveFrame(AVFrame *avFrame, int width, int height, int frameIndex)
  * ffmpeg's parser ensures that the packets we get contain either complete or
  * multiple frames.
  */
-

@@ -107,8 +107,8 @@ int main(int argc, char **argv) {
   }
   filename = argv[1];
 
-  /* find the MP2 encoder */
-  codec = avcodec_find_encoder(AV_CODEC_ID_MP2);
+  /* find the AAC encoder */
+  codec = avcodec_find_encoder(AV_CODEC_ID_AAC);
   if (!codec) {
     fprintf(stderr, "Codec not found\n");
     exit(1);
@@ -122,7 +122,6 @@ int main(int argc, char **argv) {
 
   /* put sample parameters */
   c->bit_rate = 64000;
-
   /* check that the encoder supports s16 pcm input */
   c->sample_fmt = AV_SAMPLE_FMT_S16;
   if (!check_sample_fmt(codec, c->sample_fmt)) {
@@ -131,10 +130,13 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  fprintf(stdout, "sample_fmt: %s\n", av_get_sample_fmt_name(c->sample_fmt));
+
   /* select other audio parameters supported by the encoder */
   c->sample_rate = select_sample_rate(codec);
   c->channel_layout = select_channel_layout(codec);
   c->channels = av_get_channel_layout_nb_channels(c->channel_layout);
+  c->time_base = (AVRational){1, c->sample_rate};
 
   /* open it */
   if (avcodec_open2(c, codec, NULL) < 0) {
@@ -165,6 +167,9 @@ int main(int argc, char **argv) {
   frame->nb_samples = c->frame_size;
   frame->format = c->sample_fmt;
   frame->channel_layout = c->channel_layout;
+
+  fprintf(stdout, "frame sample_fmt: %s\n",
+          av_get_sample_fmt_name(frame->format));
 
   /* allocate the data buffers */
   ret = av_frame_get_buffer(frame, 0);
