@@ -150,10 +150,13 @@ int main(int argc, char **argv) {
   printf("read file finish\n");
   decode(codec_ctx, NULL, frame, out_file);
 
+  printf("decode file finish\n");
+
   fclose(in_file);
   fclose(out_file);
 
-  av_free(io_buffer);
+  //   av_free(io_buffer);  // double free
+
   av_frame_free(frame);
   av_packet_free(packet);
 
